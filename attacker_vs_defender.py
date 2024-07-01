@@ -23,15 +23,12 @@ class UnitType(Enum):
 class Player(Enum):
     Attacker = 0
     Defender = 1
-
     def next(self) -> 'Player':
         return Player.Defender if self is Player.Attacker else Player.Attacker
 
 class GameType(Enum):
     AttackerVsComp = 1
     CompVsDefender = 2
-
-
     def __str__(self):
         if self == GameType.AttackerVsComp:
             return "Attacker vs Comp"
@@ -186,7 +183,7 @@ class Options:
     max_time: Optional[float] = 5.0
     game_type: GameType = GameType.CompVsDefender
     alpha_beta: bool = True
-    max_turns: Optional[int] = 300
+    max_turns: Optional[int] = 150
     heuristic: Optional[int] = 0
 
 @dataclass(slots=True)
@@ -277,13 +274,11 @@ class Game:
             return True
 
         if (self.board[coords.src.row][coords.src.col].player == Player.Attacker and coords.src.col < coords.dst.col) or (self.board[coords.src.row][coords.src.col].player == Player.Attacker and coords.src.row < coords.dst.row):
-            if not bot:
-                print("The attacker’s AI, Firewall and Program can only move up or left")
+            
             return False
 
         if (self.board[coords.src.row][coords.src.col].player == Player.Defender and coords.src.col > coords.dst.col) or (self.board[coords.src.row][coords.src.col].player == Player.Defender and coords.src.row > coords.dst.row):
-            if not bot:
-                print("The defender’s AI, Firewall and Program can only move down or right")
+
             return False
         return True
 
@@ -328,7 +323,7 @@ class Game:
             return (True, f"{target.to_string()} self-destructed", 1)
         elif self.is_adjacent(coords):
             if self.is_ally(coords.dst):
-                if target.health == 9:
+                if target.health == 5:
                     return (False, f"{target.to_string()} already has max health", -1)
                 else:
                     if self.repair(coords) == 0:
@@ -433,20 +428,20 @@ class Game:
         print("\n" + str(self))
 
     def computer_turn(self) -> Optional[CoordPair]:
-        mv = self.suggest_move()
-        if mv is not None:
-            success, result, actionType = self.perform_move(mv)
+        best_sequence = self.optimize_move_sequence()
+        best_move = best_sequence[0]
+        if isinstance(best_move, CoordPair):
+            success, result, actionType = self.perform_move(best_move)
             if success:
-                print(f"Computer {self.next_player.name}: {result if result else f'move from {mv.src.to_string()} to {mv.dst.to_string()}'}")
+                print(f"Computer {self.next_player.name}: {result if result else f'move from {best_move.src.to_string()} to {best_move.dst.to_string()}'}")
                 self.next_turn()
                 print("\n" + str(self))
-                move = (mv, actionType)
+                move = (best_move, actionType)
                 return move
         return None
 
     def suggest_move(self) -> Optional[CoordPair]:
         start_time = datetime.now()
-
         alpha_beta = self.options.alpha_beta
         maxPlayer = True
         alpha = -2000000000
@@ -592,18 +587,13 @@ class Game:
                     score += (unit.health - target.health) + (unit.damage_amount(target) - target.damage_amount(unit))
         return score
 
-    def random_move(self) -> Tuple[int, Optional[CoordPair], float]:
-        dumb_move = True
+    def random_move(self) -> CoordPair:
         move_candidates = list(self.generate_moves())
-        while dumb_move:
-            random.shuffle(move_candidates)
-            if move_candidates[0].src != move_candidates[0].dst:
-                dumb_move = False
-
-        if move_candidates:
-            return 0, move_candidates[0], 1
-        else:
-            return 0, None, 0
+        random.shuffle(move_candidates)
+        for move in move_candidates:
+            if move.src != move.dst:
+                return move
+        return CoordPair()  # Return a default or valid CoordPair if no valid move is found
 
     def generate_moves(self) -> Iterable[CoordPair]:
         move = CoordPair()
@@ -713,16 +703,15 @@ class Game:
 
         return damage_sim
 
-    def evaluate_move(self, individual):
+    def evaluate_move(self, unit):
         damage_sim = self.fuzzy_logic()
         fitness = 0
 
-        for coord, unit in self.player_units(self.next_player):
-            if unit.type == UnitType.Virus:
-                damage_sim.input['health'] = unit.health
-                damage_sim.compute()
-                predicted_damage = damage_sim.output['damage']
-                fitness += predicted_damage
+        if unit.type == UnitType.Virus:
+            damage_sim.input['health'] = unit.health
+            damage_sim.compute()
+            predicted_damage = damage_sim.output['damage']
+            fitness += predicted_damage
 
         return fitness
 
@@ -732,6 +721,9 @@ class Game:
         for move in sequence:
             success, result, actionType = temp_game.perform_move(move)
             if success:
+                unit = temp_game.get(move.dst)
+                if unit:
+                    fitness += self.evaluate_move(unit)
                 if temp_game.has_winner() == self.next_player:
                     fitness += 1000
                 if actionType == 3:
@@ -809,7 +801,7 @@ class GameTrace:
 
 def main():
     parser = argparse.ArgumentParser(
-        prog='ai_wargame',
+        prog='attacker_vs_defender',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--max_time', type=float, help='maximum search time', default=5)
     parser.add_argument('--max_turns', type=int, help='maximum turns before end of game', default=100)
@@ -1153,13 +1145,13 @@ def main_pygame():
                 if move is not None:
                     move_result = f"Computer {game.next_player.name} moved"
                     print(move_result)
-                    pygame.time.wait(3000)
+                    pygame.time.wait(500)
             elif game.options.game_type == GameType.CompVsDefender and game.next_player == Player.Attacker:
                 move = game.computer_turn()
                 if move is not None:
                     move_result = f"Computer {game.next_player.name} moved"
                     print(move_result)
-                    pygame.time.wait(3000) 
+                    pygame.time.wait(500) 
 
             winner = game.has_winner()
             if winner is not None:
